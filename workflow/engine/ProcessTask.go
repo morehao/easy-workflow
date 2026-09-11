@@ -448,15 +448,17 @@ func TaskUpstreamNodeList(TaskID int) ([]Node, error) {
 		return nil, err
 	}
 
+	//注意：proc_execution 是所有流程共用的一张表，递归查找必须限定在同一个 proc_id 内，
+	//否则会串到其他流程的同名节点上（例如其他流程也有一个 "Start" 节点）。
 	sql := "WITH RECURSIVE tmp(`node_id`,node_name,`prev_node_id`,`node_type`) AS " +
 		"(SELECT `node_id`,node_name,`prev_node_id`,`node_type` " +
-		"FROM `proc_execution` WHERE node_id=? " +
+		"FROM `proc_execution` WHERE proc_id=? AND node_id=? " +
 		"UNION ALL " +
 		"SELECT a.`node_id`,a.node_name,a.`prev_node_id`,a.`node_type` " +
-		"FROM `proc_execution` a JOIN tmp b ON a.node_id=b.`prev_node_id`) " +
+		"FROM `proc_execution` a JOIN tmp b ON a.node_id=b.`prev_node_id` AND a.proc_id=?) " +
 		"SELECT DISTINCT node_id,node_name,prev_node_id,node_type FROM tmp WHERE node_type!=2 AND node_id!=?;"
 	var nodes []Node
-	if _, err := ExecSQL(sql, &nodes, task.NodeID, task.NodeID); err == nil {
+	if _, err := ExecSQL(sql, &nodes, task.ProcID, task.NodeID, task.ProcID, task.NodeID); err == nil {
 		return nodes, nil
 	} else {
 		return nil, err
@@ -559,7 +561,10 @@ func TaskNextNode(TaskID int) (Node, error) {
 			//任务节点的下一个节点永远只有一个，一个任务节点下不可能直接衍生出多个任务节点,因为衍生多个节点是网关的任务
 			//而本项目中是混合网关，任务节点下没有必要生成多个网关
 			var ProcExecutionNextNode database.ProcExecution
-			result := DB.Where("prev_node_id=?", taskInfo.NodeID).First(&ProcExecutionNextNode)
+			//注意：proc_execution 是所有流程共用的一张表，这里必须带上 proc_id 过滤。
+			//否则当同库的其他流程存在同名节点时（例如多个流程都用 "Start"、"END" 作为节点ID），
+			//First() 会按主键取到别的流程的节点，导致流程流转到不属于本流程的节点上报错。
+			result := DB.Where("proc_id=? AND prev_node_id=?", taskInfo.ProcID, taskInfo.NodeID).First(&ProcExecutionNextNode)
 			if result.Error != nil {
 				return Node{}, result.Error
 			}

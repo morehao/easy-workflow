@@ -108,6 +108,77 @@ func (e *MyEvent) MyEvent_End(ProcessInstanceID int, CurrentNode *Node, PrevNode
 ### 更多信息
 **请查阅源码根目录下"EasyWorkFlow工作流引擎说明文档.pdf"文档**  
 
+## 配套前端（本仓库新增）
+本仓库在 `web/` 目录下提供了一套基于 [LogicFlow](https://github.com/didi/LogicFlow) 的前端，
+直接对接上面的 `web_api` 接口，包含**流程设计器**、流程定义管理、实例中心、任务中心与**流程图进度回显**。
+
+### 一条命令起前后端
+
+```bash
+make            # 启动后端 :8180 + 前端 :5173，Ctrl-C 一起停止
+```
+
+浏览器打开 <http://localhost:5173>（别用 `127.0.0.1`，dev server 只绑了 IPv6 回环）。
+另开一个终端可以跑自检：
+
+```bash
+make check      # 25 + 29 + 32 项断言（纯前端转换 / 前后端联调 / 引擎流程语义）
+```
+
+`make` 会自动检查端口与数据库、首次运行自动 `npm install`，并把两端日志同时打到终端
+（带 `[后端]` / `[前端]` 前缀）和 `logs/` 目录下。
+
+### 全部 make 命令
+
+```bash
+make help       # 查看全部命令
+```
+
+| 命令 | 说明 |
+| --- | --- |
+| `make` / `make dev` | 一键启动前后端（默认目标） |
+| `make backend` / `make frontend` | 只启动其中一端 |
+| `make check` | 全部自检；也可用 `check-convert` / `check-e2e` / `check-engine` 单独跑 |
+| `make status` / `make stop` | 查看状态 / 停掉占用端口的进程 |
+| `make build` / `make typecheck` / `make setup` / `make clean` | 构建、类型检查、装依赖、清理 |
+| `make db-up` / `make db-reset` / `make db-tables` | 启动 MySQL / 重建库 / 查看表与流程定义 |
+
+连接信息可用变量覆盖，例如：
+
+```bash
+make dev DB_HOST=192.168.1.10 DB_PORT=3306 DB_USER=root DB_PASS=secret
+```
+
+### 不用 make 的手动方式
+
+```bash
+# 1. 准备 MySQL 8（引擎会自动建表，但不会建库）
+docker run -d --name easy-workflow-mysql -e MYSQL_ROOT_PASSWORD=123456 \
+  -e MYSQL_DATABASE=easy_workflow -e MYSQL_USER=goeasy -e MYSQL_PASSWORD='sNd%sLDjd*12' \
+  -p 3306:3306 mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+
+# 2. 启动引擎（监听 :8180，接口前缀 /process，首次启动会自动播种示例流程）
+go run example/main.go
+
+# 3. 启动前端（Vite 会把 /process 代理到 :8180）
+cd web && npm install && npm run dev   # http://localhost:5173
+
+# 4. 验证端到端联通（29 项断言，需上面三步都在运行）
+cd web && npm run check:e2e
+```
+
+数据库连接默认指向本地，可用环境变量覆盖（`EASY_WORKFLOW_DSN` / `EASY_WORKFLOW_DB_HOST` /
+`EASY_WORKFLOW_DB_USER` / `EASY_WORKFLOW_DB_PASS` / `EASY_WORKFLOW_DB_NAME` / `EASY_WORKFLOW_API_ADDR`）。
+
+打开 <http://localhost:5173/defs/new?demo=1> 可直接载入内置的「员工请假」示例流程（含排他网关、并行网关、会签节点）。
+详见 [web/README.md](web/README.md)。
+
+> **顺带修复的引擎缺陷**：`proc_execution` 是所有流程共用的表，但 `TaskNextNode()` 与
+> `TaskUpstreamNodeList()` 漏了 `proc_id` 过滤。只要同库的两个流程存在同名节点
+> （例如都用 `Start` / `END`），B 流程的实例就会去 A 流程里找节点，发起实例直接报
+> `ID为N的流程实例中不存在ID为xxx的节点`。也就是说**修复前一个库实际只能放一个流程定义**。
+> 已给这两处补上 `proc_id` 过滤（共 4 行 SQL 条件），修复后同一个库可放任意多个流程、节点ID可重名。
+
 
 ### 聊聊天  
 这个项目是去年为了解决实际需求，对比了几个开源go工作流，觉得都不满意而自己上手写的。最近陆陆续续有一部分同学加我微信咨询问题，能帮到一些小忙，还是挺欣慰的，算是为中国开源软件做了一点点贡献吧。  

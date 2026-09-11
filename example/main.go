@@ -1,18 +1,53 @@
 package main
 
 import (
+	"fmt"
 	. "github.com/Bunny3th/easy-workflow/example/event"
 	. "github.com/Bunny3th/easy-workflow/example/process"
 	"github.com/Bunny3th/easy-workflow/example/schedule"
 	. "github.com/Bunny3th/easy-workflow/workflow/engine"
 	. "github.com/Bunny3th/easy-workflow/workflow/web_api"
 	"github.com/gin-gonic/gin"
+	"os"
 	"time"
 )
 
+// DBConnConfig 配置引擎的数据库连接。
+// 默认连接本地 MySQL（与本仓库 web/ 前端配合可直接跑通），
+// 也可通过环境变量覆盖，指向你自己的数据库：
+//
+//	EASY_WORKFLOW_DSN      完整 DSN，设置后忽略下面几个分项变量
+//	EASY_WORKFLOW_DB_HOST  默认 127.0.0.1:3306
+//	EASY_WORKFLOW_DB_USER  默认 goeasy
+//	EASY_WORKFLOW_DB_PASS  默认 sNd%sLDjd*12
+//	EASY_WORKFLOW_DB_NAME  默认 easy_workflow
+//
+// 库需要事先存在（引擎会自动建表，但不会建库）：
+//
+//	CREATE DATABASE easy_workflow DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_general_ci;
 func DBConnConfig() {
-	DBConnConfigurator.DBConnectString = "goeasy:sNd%sLDjd*12@tcp(172.16.18.18:3306)/easy_workflow?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := os.Getenv("EASY_WORKFLOW_DSN")
+	if dsn == "" {
+		host := envOrDefault("EASY_WORKFLOW_DB_HOST", "127.0.0.1:3306")
+		user := envOrDefault("EASY_WORKFLOW_DB_USER", "goeasy")
+		pass := envOrDefault("EASY_WORKFLOW_DB_PASS", "sNd%sLDjd*12")
+		name := envOrDefault("EASY_WORKFLOW_DB_NAME", "easy_workflow")
+		dsn = fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", user, pass, host, name)
+	}
+	DBConnConfigurator.DBConnectString = dsn
 	DBConnConfigurator.LogLevel = 4 //日志级别(默认3) 1:Silent 2:Error 3:Warn 4:Info
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// apiAddr 返回 web api 监听地址，默认 :8180
+func apiAddr() string {
+	return envOrDefault("EASY_WORKFLOW_API_ADDR", ":8180")
 }
 
 func main() {
@@ -43,5 +78,5 @@ func main() {
 	//这里定义中间件
 	engine.Use(gin.Logger())   //gin的默认log，默认输出是os.Stdout，即屏幕
 	engine.Use(gin.Recovery()) //从任何panic中恢复，并在出现panic时返回http 500
-	StartWebApi(engine, "/process", true, "/swagger/*any", ":8180")
+	StartWebApi(engine, "/process", true, "/swagger/*any", apiAddr())
 }

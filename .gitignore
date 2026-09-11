@@ -13,5 +13,17 @@ logs/
 test/
 *.exe
 
+# make build 产出的后端二进制
+/easy-workflow
+
+# 本地临时目录：Go 构建缓存 .tmp/gocache、e2e 临时脚本等
+/.tmp/
+
+# 本地日志文件
+*.log
+
+# macOS 目录元数据
+.DS_Store
+
 
 

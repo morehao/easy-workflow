@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"github.com/Bunny3th/easy-workflow/workflow/database"
 	. "github.com/Bunny3th/easy-workflow/workflow/model"
 	"regexp"
 	"strings"
@@ -39,6 +40,16 @@ func ProcessNode(ProcessInstanceID int, CurrentNode *Node, PrevNode Node) error 
 	}
 
 	if CurrentNode.NodeType == EndNode {
+		//先把实例的 current_node_id 落到结束节点上：
+		//EndNodeHandle 会把 proc_inst 整行归档进 hist_proc_inst，之后再改就来不及了。
+		//不更新的话，实例的 current_node_id 会永远停在"进入结束节点之前"的那个任务节点上
+		//（例如流程已走完，当前节点却还显示 Boss）。
+		result := DB.Model(&database.ProcInst{}).Where("id=?", ProcessInstanceID).
+			Update("current_node_id", CurrentNode.NodeID)
+		if result.Error != nil {
+			return result.Error
+		}
+
 		err := EndNodeHandle(ProcessInstanceID, 1)
 		if err != nil {
 			return err

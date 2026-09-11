@@ -1,0 +1,216 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #f5f6f8;
+}
+
+/* ------------------------------------------------------------------ */
+/* LogicFlow 画布容器                                                   */
+/* ------------------------------------------------------------------ */
+
+.lf-canvas-wrapper {
+  position: relative;
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.lf-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* LogicFlow 默认会给节点文本一个浅色描边，这里去掉以获得更干净的观感 */
+.lf-canvas .lf-node-text-auto-wrap text {
+  paint-order: stroke;
+}
+
+/* ------------------------------------------------------------------ */
+/* 设计器布局                                                           */
+/* ------------------------------------------------------------------ */
+
+.designer-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+  align-content: flex-start;
+}
+
+.designer-palette {
+  width: 208px;
+  flex: 0 0 208px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.designer-canvas {
+  /* 关键：给画布一个最小宽度，避免在窄屏下被两侧面板挤成 0 宽（LogicFlow 会因此取不到宽高） */
+  flex: 1 1 520px;
+  min-width: 460px;
+  display: flex;
+  flex-direction: column;
+}
+
+.designer-props {
+  width: 360px;
+  flex: 0 0 360px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+@media (max-width: 1500px) {
+  .designer-palette {
+    flex: 0 0 180px;
+    width: 180px;
+  }
+  .designer-props {
+    flex: 0 0 320px;
+    width: 320px;
+  }
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  cursor: grab;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.1s;
+  user-select: none;
+}
+
+.palette-item:hover {
+  border-color: #1677ff;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.15);
+}
+
+.palette-item:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.palette-item-shape {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.palette-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+.palette-item-desc {
+  font-size: 11px;
+  color: #8c8c8c;
+  line-height: 1.4;
+}
+
+/* 让菱形/圆形缩略图好看一点 */
+.palette-shape-circle {
+  border-radius: 50%;
+  border: 2px solid;
+  background: #fff;
+}
+
+.palette-shape-rect {
+  border-radius: 4px;
+  border: 2px solid;
+  background: #fff;
+}
+
+.palette-shape-diamond {
+  transform: rotate(45deg);
+  border-radius: 3px;
+  border: 2px solid;
+  background: #fff;
+  width: 19px !important;
+  height: 19px !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* 只读流程图图例                                                       */
+/* ------------------------------------------------------------------ */
+
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+  color: #595959;
+}
+
+.flow-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flow-legend-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 2px solid;
+}
+
+/* ------------------------------------------------------------------ */
+/* 其它                                                                 */
+/* ------------------------------------------------------------------ */
+
+.json-viewer {
+  margin: 0;
+  padding: 12px 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 460px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.text-muted {
+  color: #8c8c8c;
+}
+
+.task-node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inline-code {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+}

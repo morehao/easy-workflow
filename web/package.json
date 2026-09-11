@@ -1,0 +1,36 @@
+{
+  "name": "easy-workflow-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "easy-workflow 前端：基于 LogicFlow 的流程设计器与审批工作台",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "check:convert": "esbuild scripts/verify-convert.ts --bundle --platform=node --format=cjs --alias:@=./src --outfile=node_modules/.cache/verify-convert.cjs --log-level=warning && node node_modules/.cache/verify-convert.cjs",
+    "check:e2e": "esbuild scripts/verify-e2e.ts --bundle --platform=node --format=cjs --alias:@=./src --outfile=node_modules/.cache/verify-e2e.cjs --log-level=warning && node node_modules/.cache/verify-e2e.cjs",
+    "check:engine": "python3 scripts/e2e-engine.py"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.5.1",
+    "@logicflow/core": "^2.2.5",
+    "@logicflow/extension": "^2.3.1",
+    "antd": "^5.21.6",
+    "axios": "^1.7.7",
+    "dayjs": "^1.11.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
