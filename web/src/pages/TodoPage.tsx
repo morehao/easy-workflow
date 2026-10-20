@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Card, Form, Input, Space, Table, Tag, Typography } from 'antd'
-import { ReloadOutlined, SearchOutlined, SolutionOutlined } from '@ant-design/icons'
+import { Alert, App as AntdApp, Button, Card, Form, Input, Space, Table, Tag, Typography } from 'antd'
+import dayjs from 'dayjs'
+import { CheckCircleOutlined, ReloadOutlined, SearchOutlined, SolutionOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { listTodoTasks } from '@/api/task'
+import { batchPassTasks, listTodoTasks } from '@/api/task'
 import type { WorkflowTask } from '@/types/workflow'
 import TaskHandleDrawer from '@/components/TaskHandleDrawer'
 import { useCurrentUser } from '@/components/CurrentUserContext'
@@ -15,11 +16,36 @@ export default function TodoPage() {
   const [procName, setProcName] = useState('')
   const [query, setQuery] = useState({ userid: userId, procname: '', asc: true })
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  const [batchLoading, setBatchLoading] = useState(false)
+  const { message } = AntdApp.useApp()
 
   const { data, loading, error, reload } = useAsyncData<WorkflowTask[]>(
     () => listTodoTasks({ userid: query.userid, procname: query.procname, asc: query.asc, idx: 0, rows: 200 }),
     [query.userid, query.procname, query.asc],
   )
+
+  const handleBatchPass = async () => {
+    if (!selectedRowKeys.length) {
+      message.warning('请先选择要批量通过的任务')
+      return
+    }
+    setBatchLoading(true)
+    try {
+      const res = await batchPassTasks(selectedRowKeys.map((k) => Number(k)))
+      if (res.failed?.length) {
+        message.warning(`批量完成：成功 ${res.passed.length} 条，失败 ${res.failed.length} 条`)
+      } else {
+        message.success(`批量通过 ${res.passed.length} 条任务`)
+      }
+      setSelectedRowKeys([])
+      reload()
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setBatchLoading(false)
+    }
+  }
 
   const columns: ColumnsType<WorkflowTask> = [
     { title: '任务ID', dataIndex: 'TaskID', width: 90 },
@@ -55,6 +81,16 @@ export default function TodoPage() {
     { title: '发起人', dataIndex: 'Starter', width: 110 },
     { title: '任务创建时间', dataIndex: 'CreateTime', width: 170 },
     {
+      title: 'SLA',
+      dataIndex: 'DueAt',
+      width: 150,
+      render: (v: string | null, record) => {
+        if (!v) return <Typography.Text type="secondary">-</Typography.Text>
+        const overdue = record.IsFinished === 0 && dayjs(v).isBefore(dayjs())
+        return <Tag color={overdue ? 'red' : 'default'}>{overdue ? `已超时 ${v}` : v}</Tag>
+      },
+    },
+    {
       title: '操作',
       key: 'action',
       width: 140,
@@ -78,9 +114,20 @@ export default function TodoPage() {
     <Card
       title="待办任务"
       extra={
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={reload}>
-          刷新
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<CheckCircleOutlined />}
+            loading={batchLoading}
+            disabled={!selectedRowKeys.length}
+            onClick={() => void handleBatchPass()}
+          >
+            批量通过（{selectedRowKeys.length}）
+          </Button>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={reload}>
+            刷新
+          </Button>
+        </Space>
       }
     >
       <Form layout="inline" style={{ marginBottom: 16 }}>
@@ -134,6 +181,7 @@ export default function TodoPage() {
         columns={columns}
         dataSource={data || []}
         scroll={{ x: 1300 }}
+        rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
         pagination={{ pageSize: 10, showSizeChanger: true }}
         locale={{ emptyText: <Typography.Text type="secondary">当前没有待办任务</Typography.Text> }}
       />

@@ -1,15 +1,18 @@
-import { Layout, Menu, Input, Tooltip, Space, Typography } from 'antd'
+import { Layout, Menu, Input, Tooltip, Space, Typography, Button, Tag } from 'antd'
 import {
   ApartmentOutlined,
+  BellOutlined,
   CheckSquareOutlined,
   CloudUploadOutlined,
   FileTextOutlined,
   HistoryOutlined,
+  MailOutlined,
   PlayCircleOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { useLocation, useNavigate, Outlet } from 'react-router-dom'
 import { useCurrentUser } from './CurrentUserContext'
+import { useOidc } from '@/auth/oidc'
 import { API_BASE } from '@/api/client'
 
 const { Header, Sider, Content } = Layout
@@ -42,6 +45,16 @@ const MENU_ITEMS = [
       { key: '/tasks/finished', label: '已办任务' },
     ],
   },
+  {
+    key: 'collab',
+    label: '协作',
+    icon: <MailOutlined />,
+    children: [
+      { key: '/cc', label: '抄送我的' },
+      { key: '/delegations', label: '任务委托' },
+      { key: '/notifications', label: '站内通知', icon: <BellOutlined /> },
+    ],
+  },
 ]
 
 /** 根据当前路径推导需要高亮的菜单项 */
@@ -59,6 +72,7 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { userId, setUserId } = useCurrentUser()
+  const oidc = useOidc()
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -81,7 +95,7 @@ export default function AppLayout() {
         <Menu
           mode="inline"
           selectedKeys={[resolveSelectedKey(location.pathname)]}
-          defaultOpenKeys={['def', 'inst', 'task']}
+          defaultOpenKeys={['def', 'inst', 'task', 'collab']}
           items={MENU_ITEMS}
           onClick={({ key }) => navigate(key)}
           style={{ borderInlineEnd: 'none' }}
@@ -107,19 +121,33 @@ export default function AppLayout() {
           </Typography.Text>
 
           <Space size={8}>
-            <Tooltip title="所有接口都以该用户身份调用，可切换成流程中任意处理人">
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                当前用户
-              </Typography.Text>
-            </Tooltip>
-            <Input
-              size="small"
-              prefix={<UserOutlined />}
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              style={{ width: 160 }}
-              placeholder="用户ID"
-            />
+            {oidc.enabled ? (
+              <>
+                <Tag color="blue">{oidc.user?.tenantId || 'tenant'}</Tag>
+                <Typography.Text style={{ fontSize: 12 }}>
+                  {oidc.user?.name || oidc.user?.userId || '未登录'}
+                </Typography.Text>
+                <Button size="small" onClick={oidc.logout}>
+                  退出
+                </Button>
+              </>
+            ) : (
+              <>
+                <Tooltip title="所有接口都以该用户身份调用，可切换成流程中任意处理人">
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    当前用户
+                  </Typography.Text>
+                </Tooltip>
+                <Input
+                  size="small"
+                  prefix={<UserOutlined />}
+                  value={userId}
+                  onChange={(e) => setUserId(e.target.value)}
+                  style={{ width: 160 }}
+                  placeholder="用户ID"
+                />
+              </>
+            )}
           </Space>
         </Header>
 

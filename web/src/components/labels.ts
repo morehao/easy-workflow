@@ -22,6 +22,7 @@ export const INSTANCE_STATUS_META: Record<number, { text: string; color: string 
   0: { text: '审批中', color: 'processing' },
   1: { text: '已完成', color: 'success' },
   2: { text: '已撤销', color: 'default' },
+  3: { text: '已挂起', color: 'warning' },
 }
 
 /** 任务状态 */

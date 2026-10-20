@@ -9,6 +9,10 @@ import InstanceDetailPage from './pages/InstanceDetailPage'
 import TodoPage from './pages/TodoPage'
 import FinishedPage from './pages/FinishedPage'
 import NotFoundPage from './pages/NotFoundPage'
+import OidcCallbackPage from './pages/OidcCallbackPage'
+import CcPage from './pages/CcPage'
+import DelegationPage from './pages/DelegationPage'
+import NotificationPage from './pages/NotificationPage'
 
 export default function App() {
   return (
@@ -24,6 +28,10 @@ export default function App() {
         <Route path="instances/:id" element={<InstanceDetailPage />} />
         <Route path="tasks/todo" element={<TodoPage />} />
         <Route path="tasks/finished" element={<FinishedPage />} />
+        <Route path="cc" element={<CcPage />} />
+        <Route path="delegations" element={<DelegationPage />} />
+        <Route path="notifications" element={<NotificationPage />} />
+        <Route path="oidc/callback" element={<OidcCallbackPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

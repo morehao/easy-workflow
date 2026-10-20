@@ -7,6 +7,8 @@ export interface StartInstanceParams {
   Comment?: string
   /** 注意后端字段名是 VariablesJson */
   Variables?: { Key: string; Value: string }[]
+  /** 抄送用户ID，逗号分隔由前端拼 */
+  CcUserIDs?: string[]
 }
 
 /** POST /inst/start 发起流程，返回流程实例ID */
@@ -18,6 +20,7 @@ export function startInstance(params: StartInstanceParams): Promise<number> {
       BusinessID: params.BusinessID,
       Comment: params.Comment,
       VariablesJson: params.Variables?.length ? JSON.stringify(params.Variables) : undefined,
+      CcUserIDs: params.CcUserIDs?.length ? params.CcUserIDs.join(',') : undefined,
     }),
   )
 }
@@ -28,6 +31,26 @@ export function revokeInstance(instanceID: number, revokeUserID: string, force: 
     '/inst/revoke',
     toForm({ InstanceID: instanceID, RevokeUserID: revokeUserID, Force: force }),
   )
+}
+
+/** POST /inst/suspend 挂起流程 */
+export function suspendInstance(instanceID: number): Promise<{ InstanceID: number; Status: number }> {
+  return http.post('/inst/suspend', toForm({ InstanceID: instanceID }))
+}
+
+/** POST /inst/resume 恢复流程 */
+export function resumeInstance(instanceID: number): Promise<{ InstanceID: number; Status: number }> {
+  return http.post('/inst/resume', toForm({ InstanceID: instanceID }))
+}
+
+/** POST /inst/urge 催办当前处理人 */
+export function urgeInstance(instanceID: number): Promise<{ urged: number }> {
+  return http.post('/inst/urge', toForm({ InstanceID: instanceID }))
+}
+
+/** POST /inst/terminate 强制终止流程 */
+export function terminateInstance(instanceID: number): Promise<string> {
+  return http.post('/inst/terminate', toForm({ InstanceID: instanceID }))
 }
 
 /** GET /inst/task_history 流程实例的任务执行记录 */

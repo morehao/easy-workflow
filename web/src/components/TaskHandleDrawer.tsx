@@ -20,6 +20,7 @@ import {
   RollbackOutlined,
   SwapOutlined,
   UndoOutlined,
+  UserAddOutlined,
 } from '@ant-design/icons'
 import {
   getTaskAction,
@@ -30,13 +31,14 @@ import {
   taskPassDirectly,
   taskReject,
   taskTransfer,
+  addSignTask,
 } from '@/api/task'
 import type { TaskAction, WorkflowNode, WorkflowTask, WorkflowVariable } from '@/types/workflow'
 import KeyValueEditor from './KeyValueEditor'
 import ListInput from './ListInput'
 import { taskResultMeta } from './labels'
 
-export type TaskActionKind = 'pass' | 'passDirectly' | 'reject' | 'freeReject' | 'transfer'
+export type TaskActionKind = 'pass' | 'passDirectly' | 'reject' | 'freeReject' | 'transfer' | 'addSign'
 
 const ACTION_META: Record<TaskActionKind, { label: string; icon: ReactNode; danger?: boolean; tip: string }> = {
   pass: {
@@ -66,6 +68,11 @@ const ACTION_META: Record<TaskActionKind, { label: string; icon: ReactNode; dang
     icon: <UndoOutlined />,
     tip: '把任务转交给其他用户处理',
   },
+  addSign: {
+    label: '加签',
+    icon: <UserAddOutlined />,
+    tip: '在当前节点追加一个会签处理人；所有人通过后节点才继续流转',
+  },
 }
 
 interface Props {
@@ -92,6 +99,7 @@ export default function TaskHandleDrawer({ open, taskId, onClose, onSuccess, rea
   const [variables, setVariables] = useState<WorkflowVariable[]>([])
   const [rejectTo, setRejectTo] = useState<string | undefined>(undefined)
   const [transferUsers, setTransferUsers] = useState<string[]>([])
+  const [addSignUser, setAddSignUser] = useState('')
 
   useEffect(() => {
     if (!open || !taskId) return
@@ -102,6 +110,7 @@ export default function TaskHandleDrawer({ open, taskId, onClose, onSuccess, rea
     setVariables([])
     setRejectTo(undefined)
     setTransferUsers([])
+    setAddSignUser('')
 
     ;(async () => {
       try {
@@ -134,8 +143,9 @@ export default function TaskHandleDrawer({ open, taskId, onClose, onSuccess, rea
     if (action.CanDirectlyToWhoRejectedMe) list.push('passDirectly')
     if (action.CanReject) list.push('reject')
     if (action.CanFreeRejectToUpstreamNode) list.push('freeReject')
+    if (task && task.IsFinished === 0) list.push('addSign')
     return list
-  }, [action])
+  }, [action, task])
 
   const transferAllowed = !!action?.CanPass
 
@@ -164,6 +174,13 @@ export default function TaskHandleDrawer({ open, taskId, onClose, onSuccess, rea
           return
         }
         await taskTransfer(taskId, transferUsers)
+      } else if (active === 'addSign') {
+        if (!addSignUser.trim()) {
+          message.warning('请填写加签用户')
+          setSubmitting(false)
+          return
+        }
+        await addSignTask(taskId, addSignUser.trim(), comment || undefined)
       }
       message.success('操作成功')
       onSuccess?.()
@@ -237,7 +254,24 @@ export default function TaskHandleDrawer({ open, taskId, onClose, onSuccess, rea
           </div>
         )}
 
-        {active !== 'transfer' && (
+        {active === 'addSign' && (
+          <div>
+            <Typography.Text strong style={{ fontSize: 13 }}>
+              加签用户 <span style={{ color: '#ff4d4f' }}>*</span>
+            </Typography.Text>
+            <Input
+              style={{ marginTop: 4 }}
+              value={addSignUser}
+              onChange={(e) => setAddSignUser(e.target.value)}
+              placeholder="输入用户ID，如 U0002"
+            />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              加签后当前节点变为会签，需所有处理人通过才继续流转。
+            </Typography.Text>
+          </div>
+        )}
+
+        {active !== 'transfer' && active !== 'addSign' && (
           <div>
             <Typography.Text strong style={{ fontSize: 13 }}>
               审批意见
@@ -252,7 +286,7 @@ export default function TaskHandleDrawer({ open, taskId, onClose, onSuccess, rea
           </div>
         )}
 
-        {active !== 'transfer' && (
+        {active !== 'transfer' && active !== 'addSign' && (
           <div>
             <Typography.Text strong style={{ fontSize: 13 }}>
               流程变量（可选）

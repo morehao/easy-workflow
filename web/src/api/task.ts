@@ -58,6 +58,23 @@ export function taskFreeReject(
   )
 }
 
+/** POST /task/add-sign 加签：当前节点追加一个会签处理人 */
+export function addSignTask(taskID: number, userID: string, comment?: string): Promise<{ TaskID: number; UserID: string }> {
+  return http.post('/task/add-sign', toForm({ TaskID: taskID, UserID: userID, Comment: comment }))
+}
+
+/** POST /task/batch-pass 批量通过 */
+export function batchPassTasks(
+  taskIDs: number[],
+  comment?: string,
+  variables?: { Key: string; Value: string }[],
+): Promise<{ passed: number[]; failed: { TaskID: number; Error: string }[] }> {
+  return http.post(
+    '/task/batch-pass',
+    toForm({ TaskIDs: taskIDs.join(','), Comment: comment, VariableJson: variableJson(variables) }),
+  )
+}
+
 /** POST /task/transfer 转办 */
 export function taskTransfer(taskID: number, users: string[]): Promise<string> {
   return http.post('/task/transfer', toForm({ TaskID: taskID, Users: users.join(',') }))

@@ -122,6 +122,7 @@ export interface WorkflowTask {
   ProcInstCreateTime: string | null
   CreateTime: string | null
   FinishedTime: string | null
+  DueAt?: string | null
 }
 
 /** 对应 model.TaskAction：当前任务可以执行哪些操作 */

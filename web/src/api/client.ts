@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios'
+import { getAccessToken } from '@/auth/token'
 
 /**
  * easy-workflow 后端的响应约定比较特殊：
@@ -13,6 +14,14 @@ export const http = axios.create({
   baseURL: API_BASE,
   timeout: 20000,
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+})
+
+http.interceptors.request.use((config) => {
+  const token = getAccessToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
 })
 
 http.interceptors.response.use(

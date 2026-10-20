@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
@@ -17,13 +17,23 @@ import {
   Timeline,
   Typography,
 } from 'antd'
-import { ReloadOutlined, StopOutlined } from '@ant-design/icons'
+import { BellOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { getInstanceTaskHistory, listInstanceStartByUser, revokeInstance } from '@/api/inst'
+import { getInstanceTaskHistory, listInstanceStartByUser, resumeInstance, revokeInstance, suspendInstance, urgeInstance } from '@/api/inst'
 import { getProcDef } from '@/api/def'
+import {
+  getFormData,
+  getFormTemplate,
+  saveFormData,
+  type FormDataRow,
+  type FormSchema,
+  type FormTemplate,
+} from '@/api/form'
 import { computeProgress } from '@/logicflow/convert'
 import type { ProcInstance, WorkflowProcess, WorkflowTask } from '@/types/workflow'
 import FlowViewer from '@/components/FlowViewer'
+import FormRenderer from '@/components/FormRenderer'
+import AttachmentPanel from '@/components/AttachmentPanel'
 import TaskHandleDrawer from '@/components/TaskHandleDrawer'
 import { INSTANCE_STATUS_META, taskResultMeta } from '@/components/labels'
 import { useCurrentUser } from '@/components/CurrentUserContext'
@@ -55,6 +65,9 @@ export default function InstanceDetailPage() {
   const [revokeOpen, setRevokeOpen] = useState(false)
   const [force, setForce] = useState(false)
   const [revoking, setRevoking] = useState(false)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [formValues, setFormValues] = useState<Record<string, unknown>>({})
+  const [formSaving, setFormSaving] = useState(false)
 
   /* ------------------------------- 数据加载 ------------------------------- */
 
@@ -67,11 +80,6 @@ export default function InstanceDetailPage() {
 
   const procId = tasks?.[0]?.ProcID
   const starter = tasks?.[0]?.Starter
-
-  const { data: process } = useAsyncData<WorkflowProcess | null>(
-    () => (procId ? getProcDef(procId) : Promise.resolve(null)),
-    [procId],
-  )
 
   const {
     data: instances,
@@ -86,6 +94,53 @@ export default function InstanceDetailPage() {
     () => (instances || []).find((i) => i.ProcInstID === instId),
     [instances, instId],
   )
+  // 实例钉住的版本：发布新版本后，进度图仍按发起时的定义回显。
+  const instanceVersion = instance?.ProcVersion
+
+  const { data: process } = useAsyncData<WorkflowProcess | null>(
+    () => (procId ? getProcDef(procId, instanceVersion) : Promise.resolve(null)),
+    [procId, instanceVersion],
+  )
+
+  const { data: formTemplate } = useAsyncData<FormTemplate | null>(
+    () =>
+      procId
+        ? getFormTemplate(procId, instanceVersion, 'default').catch(() => null)
+        : Promise.resolve(null),
+    [procId, instanceVersion],
+  )
+  const formSchema = useMemo<FormSchema | null>(() => {
+    if (!formTemplate?.SchemaJSON) return null
+    try {
+      return JSON.parse(formTemplate.SchemaJSON) as FormSchema
+    } catch {
+      return null
+    }
+  }, [formTemplate])
+
+  const { data: formData, reload: reloadFormData } = useAsyncData<FormDataRow | null>(
+    () =>
+      formTemplate
+        ? getFormData(instId, formTemplate.FormKey || 'default').catch(() => null)
+        : Promise.resolve(null),
+    [formTemplate, instId],
+  )
+
+  useEffect(() => {
+    if (formData?.DataJSON) {
+      try {
+        setFormValues(JSON.parse(formData.DataJSON) as Record<string, unknown>)
+        return
+      } catch {
+        // 数据损坏时退回 schema 默认值
+      }
+    }
+    const defaults: Record<string, unknown> = {}
+    ;(formSchema?.fields || []).forEach((f) => {
+      if (f.default !== undefined && f.default !== null) defaults[f.name] = f.default
+    })
+    setFormValues(defaults)
+  }, [formData, formSchema])
 
   /* ------------------------------- 进度计算 ------------------------------- */
 
@@ -136,6 +191,69 @@ export default function InstanceDetailPage() {
     () => (selectedNode ? (tasks || []).filter((t) => t.NodeID === selectedNode) : tasks || []),
     [tasks, selectedNode],
   )
+
+  const myActiveTask = useMemo(
+    () => (tasks || []).find((t) => t.UserID === userId && t.IsFinished === 0),
+    [tasks, userId],
+  )
+  const canEditForm = !!instance && (instance.Starter === userId || !!myActiveTask)
+
+  const handleSaveForm = async () => {
+    if (!formSchema) return
+    setFormSaving(true)
+    try {
+      await saveFormData({
+        instanceId: instId,
+        key: formTemplate?.FormKey || 'default',
+        data: formValues,
+        taskId: myActiveTask?.TaskID,
+      })
+      message.success('表单已保存')
+      reloadFormData()
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setFormSaving(false)
+    }
+  }
+
+  const handleSuspend = async () => {
+    setActionLoading(true)
+    try {
+      await suspendInstance(instId)
+      message.success('流程已挂起')
+      reloadInstances()
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleResume = async () => {
+    setActionLoading(true)
+    try {
+      await resumeInstance(instId)
+      message.success('流程已恢复')
+      reloadInstances()
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleUrge = async () => {
+    setActionLoading(true)
+    try {
+      const res = await urgeInstance(instId)
+      message.success(`已催办 ${res.urged} 位处理人`)
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   /* -------------------------------- 撤销 -------------------------------- */
 
@@ -196,6 +314,7 @@ export default function InstanceDetailPage() {
     },
     { title: '创建时间', dataIndex: 'CreateTime', width: 170 },
     { title: '处理时间', dataIndex: 'FinishedTime', width: 170 },
+    { title: 'SLA截止', dataIndex: 'DueAt', width: 170 },
     {
       title: '操作',
       key: 'action',
@@ -231,9 +350,44 @@ export default function InstanceDetailPage() {
               刷新
             </Button>
             {instance?.Status === 0 && (
-              <Button danger icon={<StopOutlined />} onClick={() => setRevokeOpen(true)}>
-                撤销流程
-              </Button>
+              <>
+                <Button icon={<BellOutlined />} loading={actionLoading} onClick={() => void handleUrge()}>
+                  催办
+                </Button>
+                <Button icon={<PauseCircleOutlined />} loading={actionLoading} onClick={() => void handleSuspend()}>
+                  挂起
+                </Button>
+                <Button
+                  danger
+                  icon={<StopOutlined />}
+                  onClick={() => {
+                    setForce(true)
+                    setRevokeOpen(true)
+                  }}
+                >
+                  终止
+                </Button>
+                <Button danger icon={<StopOutlined />} onClick={() => { setForce(false); setRevokeOpen(true) }}>
+                  撤销
+                </Button>
+              </>
+            )}
+            {instance?.Status === 3 && (
+              <>
+                <Button type="primary" icon={<PlayCircleOutlined />} loading={actionLoading} onClick={() => void handleResume()}>
+                  恢复
+                </Button>
+                <Button
+                  danger
+                  icon={<StopOutlined />}
+                  onClick={() => {
+                    setForce(true)
+                    setRevokeOpen(true)
+                  }}
+                >
+                  终止
+                </Button>
+              </>
             )}
             <Button onClick={() => navigate('/tasks/todo')}>去待办</Button>
           </Space>
@@ -269,6 +423,47 @@ export default function InstanceDetailPage() {
           />
         )}
       </Card>
+
+      <Row gutter={12}>
+        <Col xs={24} xl={15}>
+          <Card
+            size="small"
+            title={formTemplate ? `申请单 · ${formTemplate.Name || formTemplate.FormKey}` : '申请单'}
+            extra={
+              formTemplate && canEditForm ? (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<SaveOutlined />}
+                  loading={formSaving}
+                  onClick={() => void handleSaveForm()}
+                >
+                  保存表单
+                </Button>
+              ) : null
+            }
+          >
+            {formSchema ? (
+              <FormRenderer
+                schema={formSchema}
+                value={formValues}
+                readOnly={!canEditForm}
+                onChange={setFormValues}
+              />
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={formTemplate ? '表单 schema 解析失败，请联系管理员' : '该流程版本未配置表单'}
+              />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} xl={9}>
+          <Card size="small" title="附件">
+            <AttachmentPanel instanceId={instId} taskId={myActiveTask?.TaskID} canEdit={canEditForm} />
+          </Card>
+        </Col>
+      </Row>
 
       <Row gutter={12}>
         <Col xs={24} xl={15}>
@@ -399,14 +594,14 @@ export default function InstanceDetailPage() {
 
       <Modal
         open={revokeOpen}
-        title={`撤销流程实例 #${instId}`}
+        title={force ? `终止流程实例 #${instId}` : `撤销流程实例 #${instId}`}
         onCancel={() => {
           setRevokeOpen(false)
           setForce(false)
         }}
         onOk={handleRevoke}
         confirmLoading={revoking}
-        okText="确认撤销"
+        okText={force ? '确认终止' : '确认撤销'}
         okButtonProps={{ danger: true }}
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>

@@ -8,6 +8,7 @@ import { NodeType, type ProcDef, type WorkflowNode } from '@/types/workflow'
 import { useAsyncData } from '@/hooks/useAsyncData'
 import FlowViewer from '@/components/FlowViewer'
 import JsonViewer from '@/components/JsonViewer'
+import FormTemplateEditor from '@/components/FormTemplateEditor'
 import { NODE_TYPE_COLOR, NODE_TYPE_TEXT } from '@/components/labels'
 import { SOURCE_STORAGE_KEY } from './DefListPage'
 
@@ -41,6 +42,7 @@ export default function DefDetailPage() {
   const resource = useMemo(() => defs?.find((d) => d.ID === procId)?.Resource || '', [defs, procId])
 
   const nodes = process?.Nodes || []
+  const procVersion = defs?.find((d) => d.ID === procId)?.Version || 0
 
   const columns: ColumnsType<WorkflowNode> = useMemo(
     () => [
@@ -177,6 +179,8 @@ export default function DefDetailPage() {
           </Descriptions>
         )}
       </Card>
+
+      <FormTemplateEditor procId={procId} version={procVersion} />
 
       <Row gutter={12}>
         <Col span={24}>

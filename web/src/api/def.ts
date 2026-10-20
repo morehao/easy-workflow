@@ -12,6 +12,6 @@ export function listProcDef(source: string): Promise<ProcDef[]> {
 }
 
 /** GET /def/get 获取流程定义（解析后的 Process 对象） */
-export function getProcDef(id: number): Promise<WorkflowProcess> {
-  return http.get('/def/get', { params: toQuery({ id }) })
+export function getProcDef(id: number, version?: number): Promise<WorkflowProcess> {
+  return http.get('/def/get', { params: toQuery({ id, version }) })
 }

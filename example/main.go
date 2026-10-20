@@ -2,14 +2,22 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
 	. "github.com/Bunny3th/easy-workflow/example/event"
 	. "github.com/Bunny3th/easy-workflow/example/process"
 	"github.com/Bunny3th/easy-workflow/example/schedule"
+	"github.com/Bunny3th/easy-workflow/workflow/auth"
+	"github.com/Bunny3th/easy-workflow/workflow/config"
+	"github.com/Bunny3th/easy-workflow/workflow/directory"
 	. "github.com/Bunny3th/easy-workflow/workflow/engine"
 	. "github.com/Bunny3th/easy-workflow/workflow/web_api"
+	"github.com/Bunny3th/easy-workflow/workflow/web_api/service"
 	"github.com/gin-gonic/gin"
-	"os"
-	"time"
 )
 
 // DBConnConfig 配置引擎的数据库连接。
@@ -45,38 +53,116 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// apiAddr 返回 web api 监听地址，默认 :8180
-func apiAddr() string {
-	return envOrDefault("EASY_WORKFLOW_API_ADDR", ":8180")
+func envBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return fallback
 }
 
 func main() {
+	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
+
 	//----------------------------开启流程引擎----------------------------
-	StartWorkFlow(DBConnConfig,false,&MyEvent{})
+	StartWorkFlow(DBConnConfig, false, &MyEvent{})
 
 	//----------------------------生成一个示例流程----------------------------
-	CreateExampleProcess()
+	// 生产/强制认证模式下默认不播种，避免每次启动都升版本、重建执行表。
+	// 本地开发可用 EASY_WORKFLOW_SEED_EXAMPLE=true 显式开启。
+	seed := envBool("EASY_WORKFLOW_SEED_EXAMPLE", cfg.AuthMode != config.AuthModeEnforce)
+	if seed {
+		CreateExampleProcess()
+	}
 
-	//开启工作流计划任务:每10秒钟执行一次自动完成任务(免审)
-	start, _ := time.ParseInLocation("2006-01-02 15:04:05", "2023-10-27 00:00:00", time.Local)
-	end, _ := time.ParseInLocation("2006-01-02 15:04:05", "2199-10-27 00:00:00", time.Local)
-	go ScheduleTask("自动完成任务", start, end, 10, schedule.AutoFinishTask)
+	//----------------------------OIDC 验签器----------------------------
+	var verifier *auth.Verifier
+	if cfg.OIDCIssuer != "" || cfg.OIDCAudience != "" {
+		if cfg.OIDCIssuer == "" || cfg.OIDCAudience == "" {
+			log.Fatal("EASY_WORKFLOW_OIDC_ISSUER and EASY_WORKFLOW_OIDC_AUDIENCE must be set together")
+		}
+		v, err := auth.NewVerifier(auth.VerifierConfig{
+			Issuer:      cfg.OIDCIssuer,
+			Audience:    cfg.OIDCAudience,
+			JWKSURL:     cfg.OIDCJWKSURL,
+			UserInfoURL: cfg.OIDCUserInfoURL,
+			Leeway:      cfg.OIDCLeeway,
+			HTTPClient:  &http.Client{Timeout: cfg.OIDCHTTPTimeout},
+		})
+		if err != nil {
+			if cfg.IsEnforced() {
+				log.Fatalf("init OIDC verifier: %v", err)
+			}
+			log.Printf("WARN: init OIDC verifier failed, token auth disabled: %v", err)
+		} else {
+			verifier = v
+		}
+	}
+	if cfg.IsEnforced() && verifier == nil {
+		log.Fatal("AUTH_MODE=enforce requires a working OIDC verifier")
+	}
 
+	// 开发身份仅在 off/optional 且未带令牌时生效；生产 enforce 不会使用。
+	devIdentity := &auth.Identity{
+		TenantID: cfg.DevTenantID,
+		UserID:   cfg.DevUserID,
+		Source:   "dev",
+		Groups:   cfg.DevRoles,
+	}
+
+	//----------------------------开启工作流计划任务----------------------------
+	// demo 自动完成必须显式开启（EASY_WORKFLOW_DEMO_AUTOFINISH=true），
+	// 避免本地/生产误自动审批。
+	if envBool("EASY_WORKFLOW_DEMO_AUTOFINISH", false) {
+		start, _ := time.ParseInLocation("2006-01-02 15:04:05", "2023-10-27 00:00:00", time.Local)
+		end, _ := time.ParseInLocation("2006-01-02 15:04:05", "2199-10-27 00:00:00", time.Local)
+		go ScheduleTask("自动完成任务", start, end, 10, schedule.AutoFinishTask)
+	}
 
 	//----------------------------开启web api----------------------------
-	//这里需要注意：如果你的业务系统也同时使用了swagger
-	//你希望业务系统的swagger页面(以下简称“业务swagger”)与easy-workflow内置web api的swagger（以下简称“工作流swagger”）同时开启
-	//必须做到：
-	//1、业务swagger与工作流swagger必须使用同一个访问路由，即假如业务swagger访问路由是"/swagger/*any",则工作流swagger必须也是这个路由
-	//2、由于同一个端口下不能起两个同名的路由地址，所以业务系统web api与easy-workflow内置web api必须使用不同的端口
-	//我做过多种尝试，希望在同一个端口下，业务系统swagger使用路由“/X ”,工作流swagger使用路由"/Y"，但x、y只能存活一个，必然有一个不能访问
-	//swagger-ui.css、swagger-ui-bundle.js、swagger-ui-standalone-preset.js这几个文件，猜测其原因，虽然module是两个，swag库是全局的
-	//在此情况下，css文件等只能适配一个路由地址。以上是我的尝试与猜测，有知道的同学可以联系我告知正确的打开方式
-
-	//本项目采用gin运行web api，首先生成一个gin.Engine
+	// 这里需要注意：如果你的业务系统也同时使用了 swagger，
+	// 业务 swagger 与工作流 swagger 必须使用同一个访问路由、不同端口；
+	// 详见 README 中的说明。
 	engine := gin.New()
-	//这里定义中间件
-	engine.Use(gin.Logger())   //gin的默认log，默认输出是os.Stdout，即屏幕
-	engine.Use(gin.Recovery()) //从任何panic中恢复，并在出现panic时返回http 500
-	StartWebApi(engine, "/process", true, "/swagger/*any", apiAddr())
+	engine.Use(gin.Logger())   // gin 默认 log，输出到 os.Stdout
+	engine.Use(gin.Recovery()) // 从 panic 恢复并返回 500
+	engine.Use(auth.Middleware(auth.MiddlewareConfig{
+		Mode:        string(cfg.AuthMode),
+		Verifier:    verifier,
+		DevIdentity: devIdentity,
+	}))
+
+	auth.SetPermissionResolver(service.ResolveRolePermission)
+	service.ConfigureAttachments(cfg.AttachmentDir, cfg.AttachmentMaxBytes)
+	SetTaskSLA(time.Duration(cfg.TaskSLAHours) * time.Hour)
+	if cfg.WebhookURL != "" {
+		service.ConfigureWebhook(cfg.WebhookURL, cfg.WebhookTimeout)
+	}
+	service.StartOutboxWorker()
+
+	if cfg.DirectoryBaseURL != "" {
+		dc, err := directory.New(directory.Config{
+			BaseURL:         cfg.DirectoryBaseURL,
+			TokenURL:        cfg.DirectoryTokenURL,
+			APIKey:          cfg.DirectoryAPIKey,
+			Resource:        cfg.DirectoryResource,
+			Timeout:         cfg.DirectoryTimeout,
+			UserAgent:       "easy-workflow-directory/1.0",
+			UseAPIKeyHeader: cfg.DirectoryAPIKeyHeader,
+		})
+		if err != nil {
+			log.Fatalf("init ark-iam directory: %v", err)
+		}
+		service.SetDirectoryClient(dc)
+	}
+
+	RegisterHealth(engine, DB)
+	RegisterMetrics(engine, DB)
+	if err := StartWebApiGraceful(engine, "/process", true, "/swagger/*any", cfg.Addr, cfg.ShutdownTimeout); err != nil {
+		log.Fatalf("web api stopped: %v", err)
+	}
 }

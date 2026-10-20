@@ -36,6 +36,7 @@ export default function InstanceStartPage() {
   )
   const [businessId, setBusinessId] = useState('')
   const [comment, setComment] = useState('')
+  const [ccUsers, setCcUsers] = useState('')
   const [starter, setStarter] = useState(userId)
   const [variables, setVariables] = useState<WorkflowVariable[]>([
     { Key: 'days', Value: '3' },
@@ -80,6 +81,10 @@ export default function InstanceStartPage() {
         BusinessID: businessId.trim(),
         Comment: comment.trim() || undefined,
         Variables: merged,
+        CcUserIDs: ccUsers
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean),
       })
       message.success(`流程已发起，实例ID ${instanceId}`)
       navigate(`/instances/${instanceId}`)
@@ -150,6 +155,14 @@ export default function InstanceStartPage() {
                 引擎会从流程变量 <span className="inline-code">starter</span> 中取出实际发起人；
                 该用户会成为实例的 Starter，并决定「自由驳回」能回到哪里。
               </Typography.Text>
+            </Form.Item>
+
+            <Form.Item label="抄送人（可选）">
+              <Input
+                value={ccUsers}
+                onChange={(e) => setCcUsers(e.target.value)}
+                placeholder="用户ID，多个用逗号分隔，如 U0002,U0003"
+              />
             </Form.Item>
 
             <Form.Item label="发起说明（Comment）">
