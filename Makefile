@@ -170,7 +170,7 @@ preflight-oidc: ## 检查 gateway(8100)/login-web(4000) 就绪，且 8180/5173 �
 .PHONY: _backend-ark
 _backend-ark:
 	@if [ -z "$(ARK_DIRECTORY_API_KEY)" ]; then \
-	  echo "  ✗ 请设置 ARK_DIRECTORY_API_KEY（本地种子见 .dsh/docs/notes/2026-10-20-ark-iam-local-seed-notes.md）"; \
+	  echo "  ✗ 请设置 ARK_DIRECTORY_API_KEY（本地种子见 example/docs/ark-iam-integration.md）"; \
 	  exit 1; \
 	fi
 	@cd $(ROOT) && \
@@ -216,7 +216,7 @@ frontend-ark: ## 只启动带 OIDC 的前端（需 gateway/login-web/后端已�
 dev-all: ## 一键启动 ark-iam gateway/login-web + easy-workflow 前后端
 	@mkdir -p $(LOG_DIR)
 	@if [ -z "$(ARK_DIRECTORY_API_KEY)" ]; then \
-	  echo "  ✗ 请设置 ARK_DIRECTORY_API_KEY（本地种子见 .dsh/docs/notes/2026-10-20-ark-iam-local-seed-notes.md）"; \
+	  echo "  ✗ 请设置 ARK_DIRECTORY_API_KEY（本地种子见 example/docs/ark-iam-integration.md）"; \
 	  exit 1; \
 	fi
 	@fail=0; \

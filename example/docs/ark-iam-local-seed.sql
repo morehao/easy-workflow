@@ -1,6 +1,13 @@
--- Local ark-iam seed for easy-workflow OA.
--- Target DB: postgres18 container, database iam.
--- Test password for all workflow_* users: Workflow123
+-- ark-iam 本地种子数据（仅开发/联调，勿用于生产）
+-- 目标库：Docker postgres18 容器的 iam 库
+-- 所有 workflow_* 测试账号密码：Workflow123
+--
+-- 说明：
+--   * 本脚本给业务租户 t-1 建好应用、OIDC 客户端、5 个角色与 5 个账号。
+--   * application.role_template 这里留空：t-1 的角色是显式插入的 custom 角色。
+--     若希望「新租户订阅应用时自动物化角色」，先按
+--     ark-iam-troubleshooting.md §4.1 设置 role_template，再订阅应用。
+--   * 用法：psql -U postgres -d iam -f ark-iam-local-seed.sql
 BEGIN;
 
 INSERT INTO tenant (id, created_at, updated_at, code, created_by, db_user, deleted_by, status, name, type, tag, updated_by)
