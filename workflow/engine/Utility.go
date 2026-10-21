@@ -3,20 +3,17 @@ package engine
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"reflect"
-	"regexp"
-	"strings"
 )
 
-//将json字符串转为struct
+// 将json字符串转为struct
 func Json2Struct(j string, s any) error {
 	return json.Unmarshal([]byte(j), s)
 }
 
-//json.Marshal()函数默认用HTMLEscape进行编码，它将替换“＜”、“＞”、“&”、U+2028和U+2029，
-//并将其转义为“\u003c”、“\u003e”、“\u0026”、“\ u2028”和“\u2029”
-//所以在这里做处理，判断是否开启转义
+// json.Marshal()函数默认用HTMLEscape进行编码，它将替换“＜”、“＞”、“&”、U+2028和U+2029，
+// 并将其转义为“\u003c”、“\u003e”、“\u0026”、“\ u2028”和“\u2029”
+// 所以在这里做处理，判断是否开启转义
 func JSONMarshal(t interface{}, escapeHtml bool) ([]byte, error) {
 	buffer := &bytes.Buffer{}
 	encoder := json.NewEncoder(buffer)
@@ -56,39 +53,19 @@ func TypeIsError(Type reflect.Type) bool {
 	return false
 }
 
-//这是一个偷懒取巧的办法:利用数据库计算网关中的条件表达式
-func ExpressionEvaluator(expression string) (bool, error) {
-	//首先通过正则表达式判断是否有SQL注入风险
-	pattern := regexp.MustCompile("delete|truncate|insert|drop|create|select|update|set|from|grant|call|execute")
-	match := pattern.FindString(strings.ToLower(expression))
-	if match != "" {
-		return false, errors.New("表达式中包含危险词,可能造成SQL注入!")
-	}
-
-	sql := "SELECT " + expression
-	var ok bool
-	_, err := ExecSQL(sql, &ok)
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
-}
-
-//利用Map，对数组/切片数据做去重处理
+// 利用Map，对数组/切片数据做去重处理
 func MakeUnique(List ...[]string) []string {
-	set := make(map[string]string)
+	seen := make(map[string]bool)
 	var unique []string
-
+	// 保持输入顺序，依次审批/比例审批依赖用户顺序。
 	for _, list := range List {
 		for _, item := range list {
-			set[item] = ""
+			if !seen[item] {
+				seen[item] = true
+				unique = append(unique, item)
+			}
 		}
 	}
-
-	for k, _ := range set {
-		unique = append(unique, k)
-	}
-
 	return unique
 }
 

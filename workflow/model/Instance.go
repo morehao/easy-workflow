@@ -4,6 +4,7 @@ import . "github.com/Bunny3th/easy-workflow/workflow/database"
 
 type Instance struct {
 	ProcInstID    int       `gorm:"column:id;"`             //流程实例ID
+	TenantID      string    `gorm:"column:tenant_id"`       //租户ID
 	ProcID        int       `gorm:"column:proc_id"`         //流程ID
 	ProcName      string    `gorm:"column:name"`            //流程名称
 	ProcVersion   int       `gorm:"column:proc_version"`    //流程版本号

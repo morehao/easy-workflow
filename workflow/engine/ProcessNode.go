@@ -3,12 +3,13 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"github.com/Bunny3th/easy-workflow/workflow/database"
 	. "github.com/Bunny3th/easy-workflow/workflow/model"
+	"gorm.io/gorm"
 	"regexp"
-	"strings"
 )
 
-//处理节点,如：生成task、进行条件判断、处理结束节点等
+// 处理节点,如：生成task、进行条件判断、处理结束节点等
 func ProcessNode(ProcessInstanceID int, CurrentNode *Node, PrevNode Node) error {
 	//这里处理开始事件
 	err := RunNodeEvents(CurrentNode.NodeStartEvents, ProcessInstanceID, CurrentNode, PrevNode)
@@ -39,6 +40,16 @@ func ProcessNode(ProcessInstanceID int, CurrentNode *Node, PrevNode Node) error 
 	}
 
 	if CurrentNode.NodeType == EndNode {
+		//先把实例的 current_node_id 落到结束节点上：
+		//EndNodeHandle 会把 proc_inst 整行归档进 hist_proc_inst，之后再改就来不及了。
+		//不更新的话，实例的 current_node_id 会永远停在"进入结束节点之前"的那个任务节点上
+		//（例如流程已走完，当前节点却还显示 Boss）。
+		result := DB.Model(&database.ProcInst{}).Where("id=?", ProcessInstanceID).
+			Update("current_node_id", CurrentNode.NodeID)
+		if result.Error != nil {
+			return result.Error
+		}
+
 		err := EndNodeHandle(ProcessInstanceID, 1)
 		if err != nil {
 			return err
@@ -48,9 +59,9 @@ func ProcessNode(ProcessInstanceID int, CurrentNode *Node, PrevNode Node) error 
 	return nil
 }
 
-//开始节点处理 开始节点是一个特殊的任务节点，其特殊点在于:
-//1、在生成流程实例的同时，就要运行开始节点
-//2、开始节点生成的任务自动完成，而后自动进行下一个节点的处理
+// 开始节点处理 开始节点是一个特殊的任务节点，其特殊点在于:
+// 1、在生成流程实例的同时，就要运行开始节点
+// 2、开始节点生成的任务自动完成，而后自动进行下一个节点的处理
 func startNodeHandle(ProcessInstanceID int, StartNode *Node, Comment string, VariableJson string) error {
 	if StartNode.NodeType != RootNode {
 		return errors.New("不是开始节点，无法处理节点:" + StartNode.NodeName)
@@ -77,8 +88,8 @@ func startNodeHandle(ProcessInstanceID int, StartNode *Node, Comment string, Var
 	return nil
 }
 
-//结束节点处理 结束节点只做收尾工作，将数据库中此流程实例产生的数据归档
-//Status 流程实例状态 1:已完成 2:撤销
+// 结束节点处理 结束节点只做收尾工作，将数据库中此流程实例产生的数据归档
+// Status 流程实例状态 1:已完成 2:撤销
 func EndNodeHandle(ProcessInstanceID int, Status int) error {
 	//开启事务
 	tx := DB.Begin()
@@ -94,12 +105,12 @@ func EndNodeHandle(ProcessInstanceID int, Status int) error {
 	}
 
 	//将task表中任务归档
-	result = tx.Exec("INSERT INTO hist_proc_task(task_id,proc_id,proc_inst_id,\n"+
+	result = tx.Exec("INSERT INTO hist_proc_task(tenant_id,task_id,proc_id,proc_inst_id,\n"+
 		"business_id,starter,node_id,node_name,prev_node_id,is_cosigned,\n"+
-		"batch_code,user_id,`status`,is_finished,`comment`,proc_inst_create_time,create_time,finished_time)\n "+
-		"SELECT id,proc_id,proc_inst_id,business_id,starter,\n"+
+		"batch_code,user_id,`status`,is_finished,`comment`,proc_inst_create_time,create_time,finished_time,due_at)\n "+
+		"SELECT tenant_id,id,proc_id,proc_inst_id,business_id,starter,\n"+
 		"node_id,node_name,prev_node_id,is_cosigned,batch_code,user_id,`status`,\n"+
-		"is_finished,`comment`,proc_inst_create_time,create_time,finished_time \n"+
+		"is_finished,`comment`,proc_inst_create_time,create_time,finished_time,due_at \n"+
 		"FROM proc_task WHERE proc_inst_id=?;", ProcessInstanceID)
 	if result.Error != nil {
 		tx.Rollback()
@@ -121,8 +132,8 @@ func EndNodeHandle(ProcessInstanceID int, Status int) error {
 	}
 
 	//将proc_inst表中数据归档
-	result = tx.Exec("INSERT INTO hist_proc_inst(proc_inst_id,proc_id,proc_version,business_id,starter,current_node_id,create_time,`status`)\n        "+
-		"SELECT id,proc_id,proc_version,business_id,starter,current_node_id,create_time,`status`\n        "+
+	result = tx.Exec("INSERT INTO hist_proc_inst(tenant_id,proc_inst_id,proc_id,proc_version,business_id,starter,current_node_id,create_time,`status`)\n        "+
+		"SELECT tenant_id,id,proc_id,proc_version,business_id,starter,current_node_id,create_time,`status`\n        "+
 		"FROM proc_inst \n        "+
 		"WHERE id=?; ", ProcessInstanceID)
 	if result.Error != nil {
@@ -138,8 +149,8 @@ func EndNodeHandle(ProcessInstanceID int, Status int) error {
 	}
 
 	//将proc_inst_variable表中数据归档
-	result = tx.Exec("INSERT INTO hist_proc_inst_variable(proc_inst_id,`key`,`value`)\n"+
-		"SELECT proc_inst_id,`key`,`value` FROM proc_inst_variable WHERE proc_inst_id=?;", ProcessInstanceID)
+	result = tx.Exec("INSERT INTO hist_proc_inst_variable(tenant_id,proc_inst_id,`key`,`value`)\n"+
+		"SELECT tenant_id,proc_inst_id,`key`,`value` FROM proc_inst_variable WHERE proc_inst_id=?;", ProcessInstanceID)
 	if result.Error != nil {
 		tx.Rollback()
 		return result.Error
@@ -157,7 +168,7 @@ func EndNodeHandle(ProcessInstanceID int, Status int) error {
 	return nil
 }
 
-//任务节点处理 返回生成的taskid数组
+// 任务节点处理 返回生成的taskid数组
 func TaskNodeHandle(ProcessInstanceID int, CurrentNode *Node, PrevNode Node) ([]int, error) {
 	//获取节点用户
 	users, err := resolveNodeUser(ProcessInstanceID, *CurrentNode)
@@ -185,7 +196,7 @@ func TaskNodeHandle(ProcessInstanceID int, CurrentNode *Node, PrevNode Node) ([]
 	return taskIDs, nil
 }
 
-//GateWay节点处理
+// GateWay节点处理
 func GateWayNodeHandle(ProcessInstanceID int, CurrentNode *Node, PrevTaskNode Node) error {
 	//--------------------首先，混合节点需要确认所有的上级节点都处理完，才能做下一步--------------------
 	var totalFinished int                          //所有已完成的上级节点
@@ -219,19 +230,14 @@ func GateWayNodeHandle(ProcessInstanceID int, CurrentNode *Node, PrevTaskNode No
 		//获取表达式中所有的变量
 		variables := reg.FindAllString(c.Expression, -1)
 
-		//替换表达式中的变量为值
-		expression := c.Expression
-		//获取变量对应的value
+		//获取变量对应的value；表达式引擎直接按变量名取值，不做字符串替换（避免值注入逻辑）
 		kv, err := ResolveVariables(ProcessInstanceID, variables)
 		if err != nil {
 			return err
 		}
-		for k, v := range kv {
-			expression = strings.Replace(expression, k, v, -1)
-		}
 
 		//计算表达式，如果成功，则将节点添加到下一级节点组中
-		ok, err := ExpressionEvaluator(expression)
+		ok, err := ExpressionEvaluatorWithVars(c.Expression, kv)
 		if err != nil {
 			return err
 		}
@@ -274,15 +280,19 @@ func GateWayNodeHandle(ProcessInstanceID int, CurrentNode *Node, PrevTaskNode No
 
 }
 
-//获取流程实例中某个Node 返回 Node
+// 获取流程实例中某个Node 返回 Node
 func GetInstanceNode(ProcessInstanceID int, NodeID string) (Node, error) {
 	ProcID, err := GetProcessIDByInstanceID(ProcessInstanceID)
 	if err != nil {
 		return Node{}, err
 	}
+	Version, err := GetInstanceProcVersion(ProcessInstanceID)
+	if err != nil {
+		return Node{}, err
+	}
 
-	//从Cache中获得流程节点列表
-	Nodes, err := GetProcCache(ProcID)
+	//从版本化Cache中获得流程节点列表；在途实例不会被新版本劫持。
+	Nodes, err := GetProcCacheVersion(ProcID, Version)
 	if err != nil {
 		return Node{}, err
 	}
@@ -295,9 +305,9 @@ func GetInstanceNode(ProcessInstanceID int, NodeID string) (Node, error) {
 	return node, nil
 }
 
-//判断特定实例中某一个节点是否已经完成
-//注意，finish只是代表节点是不是已经处理，不管处理的方式是驳回还是通过
-//一个流程实例中，由于驳回等原因，x节点可能出现多次。这里使用统计所有x节点的任务是否都finish来判断x节点是否finish
+// 判断特定实例中某一个节点是否已经完成
+// 注意，finish只是代表节点是不是已经处理，不管处理的方式是驳回还是通过
+// 一个流程实例中，由于驳回等原因，x节点可能出现多次。这里使用统计所有x节点的任务是否都finish来判断x节点是否finish
 func InstanceNodeIsFinish(ProcessInstanceID int, NodeID string) (bool, error) {
 	var finished bool
 	sql := "SELECT CASE WHEN total=finished THEN 1 ELSE 0 END AS finished " +
@@ -312,27 +322,40 @@ func InstanceNodeIsFinish(ProcessInstanceID int, NodeID string) (bool, error) {
 	}
 }
 
-//解析节点用户
-//1、获得用户变量
-//2、用户去重
+// 解析节点用户
+// 1、获得用户变量
+// 2、用户去重
 func resolveNodeUser(ProcessInstanceID int, node Node) ([]string, error) {
+	return resolveNodeUserTx(DB, ProcessInstanceID, node)
+}
+
+func resolveNodeUserTx(tx *gorm.DB, ProcessInstanceID int, node Node) ([]string, error) {
 	//匹配节点用户变量
-	kv, err := ResolveVariables(ProcessInstanceID, node.UserIDs)
+	kv, err := ResolveVariablesTx(tx, ProcessInstanceID, node.UserIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	//使用map去重，因为有可能某几个变量指向同一个用户，重复的用户会产生重复的任务
-	var usersMap = make(map[string]string)
-	for _, v := range kv {
-		usersMap[v] = ""
+	//按 node.UserIDs 的顺序解析并去重；依次审批依赖顺序。
+	seen := make(map[string]bool)
+	users := make([]string, 0, len(kv))
+	for _, key := range node.UserIDs {
+		v, ok := kv[key]
+		if !ok || v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		users = append(users, v)
 	}
-
-	//生成user数组
-	var users []string
-	for k, _ := range usersMap {
-		users = append(users, k)
+	// 兼容直接传入的非变量用户（kv 中 key 与 value 相同）
+	for _, key := range node.UserIDs {
+		if _, ok := kv[key]; ok {
+			continue
+		}
+		if !seen[key] {
+			seen[key] = true
+			users = append(users, key)
+		}
 	}
-
 	return users, nil
 }

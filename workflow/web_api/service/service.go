@@ -1,7 +1,11 @@
 package service
 
 import (
+	"sort"
+
+	"github.com/Bunny3th/easy-workflow/workflow/auth"
 	. "github.com/Bunny3th/easy-workflow/workflow/engine"
+	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
@@ -43,10 +47,18 @@ swagger注解描述 https://github.com/swaggo/swag/blob/master/README_zh-CN.md
 // @Failure      400  {object}  string 报错信息
 // @Router       /def/save [post]
 func ProcDef_Save(c *gin.Context) {
+	id, ok := requirePermission(c, auth.PermDefWrite)
+	if !ok {
+		return
+	}
 	Resource := c.PostForm("Resource")
 	CreateUserID := c.PostForm("CreateUserID")
+	// 非管理员不允许伪造创建人；管理员可代建（如迁移/导入）。
+	if !id.Can(auth.PermAdmin) || strings.TrimSpace(CreateUserID) == "" {
+		CreateUserID = id.UserID
+	}
 
-	if ProcID, err := ProcessSave(Resource, CreateUserID); err == nil {
+	if ProcID, err := ProcessSaveForTenant(Resource, CreateUserID, id.TenantID); err == nil {
 		c.JSON(http.StatusOK, ProcID)
 	} else {
 		c.JSON(400, err.Error())
@@ -62,8 +74,12 @@ func ProcDef_Save(c *gin.Context) {
 // @Failure      400  {object}  string 报错信息
 // @Router       /def/list [get]
 func ProcDef_ListBySource(c *gin.Context) {
+	identity, ok := requireAnyPermission(c, auth.PermDefRead, auth.PermInstanceStart, auth.PermTaskReadOwn)
+	if !ok {
+		return
+	}
 	source := c.Query("source")
-	if procDef, err := GetProcessList(source); err == nil {
+	if procDef, err := GetProcessListForTenant(source, identity.TenantID); err == nil {
 		c.JSON(200, procDef)
 	} else {
 		c.JSON(400, err.Error())
@@ -79,16 +95,28 @@ func ProcDef_ListBySource(c *gin.Context) {
 // @Failure      400  {object}  string 报错信息
 // @Router       /def/get [get]
 func ProcDef_GetProcDefByID(c *gin.Context) {
-	id, err := strconv.Atoi(c.Query("id"))
+	identity, ok := requireAnyPermission(c, auth.PermDefRead, auth.PermInstanceStart, auth.PermTaskReadOwn)
+	if !ok {
+		return
+	}
+	procID, err := strconv.Atoi(c.Query("id"))
 	if err != nil {
 		c.JSON(400, err.Error())
 		return
 	}
 
-	if nodes, err := GetProcessDefine(id); err == nil {
+	version, _ := strconv.Atoi(c.Query("version"))
+	var nodes model.Process
+	var err2 error
+	if version > 0 {
+		nodes, err2 = GetProcessDefineVersionForTenant(procID, version, identity.TenantID)
+	} else {
+		nodes, err2 = GetProcessDefineForTenant(procID, identity.TenantID)
+	}
+	if err2 == nil {
 		c.JSON(200, nodes)
 	} else {
-		c.JSON(400, err.Error())
+		c.JSON(400, err2.Error())
 	}
 }
 
@@ -104,6 +132,10 @@ func ProcDef_GetProcDefByID(c *gin.Context) {
 // @Failure      400  {object}  string 报错信息
 // @Router       /inst/start [post]
 func ProcInst_Start(c *gin.Context) {
+	identity, ok := requirePermission(c, auth.PermInstanceStart)
+	if !ok {
+		return
+	}
 	ProcessID, err := strconv.Atoi(c.PostForm("ProcessID"))
 	if err != nil {
 		c.JSON(400, err.Error())
@@ -112,8 +144,18 @@ func ProcInst_Start(c *gin.Context) {
 	BusinessID := c.PostForm("BusinessID")
 	Comment := c.PostForm("Comment")
 	VariablesJson := c.PostForm("VariablesJson")
+	CcUserIDs := strings.TrimSpace(c.PostForm("CcUserIDs"))
+	VariablesJson, err = forceStarterVariable(c, VariablesJson)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, err.Error())
+		return
+	}
 
-	if id, err := InstanceStart(ProcessID, BusinessID, Comment, VariablesJson); err == nil {
+	if id, err := InstanceStartForTenant(ProcessID, BusinessID, Comment, VariablesJson, identity.TenantID); err == nil {
+		if CcUserIDs != "" {
+			_ = addCcRecipients(identity.TenantID, id, strings.Split(CcUserIDs, ","), identity.UserID)
+		}
+		notifyInstanceActiveTasks(identity.TenantID, id, "新的审批任务", "流程实例 #"+strconv.Itoa(id)+" 已发起")
 		c.JSON(200, id)
 	} else {
 		c.JSON(400, err.Error())
@@ -136,8 +178,11 @@ func ProcInst_Revoke(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
-
-	RevokeUserID := c.PostForm("RevokeUserID")
+	if _, ok := requireInstanceRevoker(c, InstanceID); !ok {
+		return
+	}
+	// 撤销人一律取当前身份，忽略表单传入的 RevokeUserID，防止伪造。
+	RevokeUserID := currentIdentity(c).UserID
 
 	Force, err := strconv.ParseBool(c.PostForm("Force"))
 	if err != nil {
@@ -166,7 +211,11 @@ func ProcInst_TaskHistory(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
-	if tasklist, err := GetInstanceTaskHistory(InstanceID); err == nil {
+	inst, ok := requireInstanceReader(c, InstanceID)
+	if !ok {
+		return
+	}
+	if tasklist, err := GetInstanceTaskHistoryForTenant(InstanceID, inst.TenantID); err == nil {
 		c.JSON(200, tasklist)
 	} else {
 		c.JSON(400, err.Error())
@@ -185,7 +234,10 @@ func ProcInst_TaskHistory(c *gin.Context) {
 // @Failure      400  {object}  string 报错信息
 // @Router       /inst/start/by [get]
 func ProcInst_StartByUser(c *gin.Context) {
-	UserID := c.Query("userid")
+	UserID, ok := scopedUserID(c, c.Query("userid"))
+	if !ok {
+		return
+	}
 	ProcessName := c.Query("procname")
 	StartIndex, err := strconv.Atoi(c.Query("idx"))
 	if err != nil {
@@ -198,7 +250,7 @@ func ProcInst_StartByUser(c *gin.Context) {
 		return
 	}
 
-	if insts, err := GetInstanceStartByUser(UserID, ProcessName, StartIndex, MaxRow); err == nil {
+	if insts, err := GetInstanceStartByUserForTenant(UserID, ProcessName, StartIndex, MaxRow, currentIdentity(c).TenantID); err == nil {
 		c.JSON(200, insts)
 	} else {
 		c.JSON(400, err.Error())
@@ -221,10 +273,15 @@ func Task_Pass(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
+	task, ok := requireTaskActor(c, TaskID)
+	if !ok {
+		return
+	}
 	Comment := c.PostForm("Comment")
 	VariableJson := c.PostForm("VariableJson")
 
 	if err := TaskPass(TaskID, Comment, VariableJson, false); err == nil {
+		notifyInstanceActiveTasks(task.TenantID, task.ProcInstID, "流程有新进展", task.ProcName+" 已流转")
 		c.JSON(200, "ok")
 	} else {
 		c.JSON(400, err.Error())
@@ -245,6 +302,9 @@ func Task_Pass_DirectlyToWhoRejectedMe(c *gin.Context) {
 	TaskID, err := strconv.Atoi(c.PostForm("TaskID"))
 	if err != nil {
 		c.JSON(400, err.Error())
+		return
+	}
+	if _, ok := requireTaskActor(c, TaskID); !ok {
 		return
 	}
 	Comment := c.PostForm("Comment")
@@ -273,6 +333,9 @@ func Task_Reject(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
+	if _, ok := requireTaskActor(c, TaskID); !ok {
+		return
+	}
 	Comment := c.PostForm("Comment")
 	VariableJson := c.PostForm("VariableJson")
 
@@ -298,6 +361,9 @@ func Task_Transfer(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
+	if _, ok := requireTaskActor(c, TaskID); !ok {
+		return
+	}
 	Users := strings.Split(c.PostForm("Users"), ",")
 
 	if err := TaskTransfer(TaskID, Users); err == nil {
@@ -320,7 +386,10 @@ func Task_Transfer(c *gin.Context) {
 // @Failure      400  {object}  string 报错信息
 // @Router       /task/todo [get]
 func Task_ToDoList(c *gin.Context) {
-	UserID := c.Query("userid")
+	UserID, ok := scopedUserID(c, c.Query("userid"))
+	if !ok {
+		return
+	}
 	ProcessName := c.Query("procname")
 	SortByAsc, err := strconv.ParseBool(c.Query("asc"))
 	if err != nil {
@@ -338,7 +407,45 @@ func Task_ToDoList(c *gin.Context) {
 		return
 	}
 
-	if tasks, err := GetTaskToDoList(UserID, ProcessName, SortByAsc, StartIndex, MaxRow); err == nil {
+	tenantID := currentIdentity(c).TenantID
+	if UserID != "" && UserID == currentIdentity(c).UserID {
+		froms := delegatedFromUsers(tenantID, UserID)
+		if len(froms) > 0 {
+			all := make([]model.Task, 0)
+			seen := map[int]bool{}
+			fetchUsers := append([]string{UserID}, froms...)
+			for _, u := range fetchUsers {
+				list, err := GetTaskToDoListForTenant(u, ProcessName, SortByAsc, 0, StartIndex+MaxRow, tenantID)
+				if err != nil {
+					c.JSON(400, err.Error())
+					return
+				}
+				for _, t := range list {
+					if !seen[t.TaskID] {
+						seen[t.TaskID] = true
+						all = append(all, t)
+					}
+				}
+			}
+			sort.Slice(all, func(i, j int) bool {
+				if SortByAsc {
+					return all[i].TaskID < all[j].TaskID
+				}
+				return all[i].TaskID > all[j].TaskID
+			})
+			if StartIndex > 0 && StartIndex < len(all) {
+				all = all[StartIndex:]
+			} else if StartIndex >= len(all) {
+				all = nil
+			}
+			if MaxRow > 0 && len(all) > MaxRow {
+				all = all[:MaxRow]
+			}
+			c.JSON(200, all)
+			return
+		}
+	}
+	if tasks, err := GetTaskToDoListForTenant(UserID, ProcessName, SortByAsc, StartIndex, MaxRow, tenantID); err == nil {
 		c.JSON(200, tasks)
 	} else {
 		c.JSON(400, err.Error())
@@ -359,7 +466,10 @@ func Task_ToDoList(c *gin.Context) {
 // @Failure      400  {object}  string 报错信息
 // @Router       /task/finished [get]
 func Task_FinishedList(c *gin.Context) {
-	UserID := c.Query("userid")
+	UserID, ok := scopedUserID(c, c.Query("userid"))
+	if !ok {
+		return
+	}
 	ProcessName := c.Query("procname")
 	IgnoreStartByMe, err := strconv.ParseBool(c.Query("ignorestartbyme"))
 	if err != nil {
@@ -381,7 +491,7 @@ func Task_FinishedList(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
-	if tasks, err := GetTaskFinishedList(UserID, ProcessName, IgnoreStartByMe,SortByAsc, StartIndex, MaxRow); err == nil {
+	if tasks, err := GetTaskFinishedList(UserID, ProcessName, IgnoreStartByMe, SortByAsc, StartIndex, MaxRow); err == nil {
 		c.JSON(200, tasks)
 	} else {
 		c.JSON(400, err.Error())
@@ -400,6 +510,9 @@ func Task_UpstreamNodeList(c *gin.Context) {
 	TaskID, err := strconv.Atoi(c.Query("taskid"))
 	if err != nil {
 		c.JSON(400, err.Error())
+		return
+	}
+	if _, ok := requireTaskReader(c, TaskID); !ok {
 		return
 	}
 
@@ -425,6 +538,9 @@ func Task_FreeRejectToUpstreamNode(c *gin.Context) {
 	TaskID, err := strconv.Atoi(c.PostForm("TaskID"))
 	if err != nil {
 		c.JSON(400, err.Error())
+		return
+	}
+	if _, ok := requireTaskActor(c, TaskID); !ok {
 		return
 	}
 
@@ -453,6 +569,9 @@ func Task_WhatCanIDo(c *gin.Context) {
 		c.JSON(400, err.Error())
 		return
 	}
+	if _, ok := requireTaskReader(c, TaskID); !ok {
+		return
+	}
 	if action, err := WhatCanIDo(TaskID); err == nil {
 		c.JSON(200, action)
 	} else {
@@ -472,6 +591,9 @@ func Task_Info(c *gin.Context) {
 	TaskID, err := strconv.Atoi(c.Query("taskid"))
 	if err != nil {
 		c.JSON(400, err.Error())
+		return
+	}
+	if _, ok := requireTaskReader(c, TaskID); !ok {
 		return
 	}
 	if taskInfo, err := GetTaskInfo(TaskID); err == nil {
